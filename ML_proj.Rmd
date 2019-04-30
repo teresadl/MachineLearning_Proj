@@ -1,0 +1,98 @@
+---
+title: "Machine Learning Algorithm for Predicting Quality of Weight Lifting Exercise"
+output: 
+      html_document:
+            keep_md: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Synopsis
+Six participants were asked to perform one set of 10 repetitions of Unilateral Dumbbell Biceps Curl in five different fashions. One class would be the correct execution of the exercise and the other four would be incorrect, and these classes are labeled as A, B, C, D, and E, respectively. The goal of this project is to use data on accelerometers and predict the manner in which the participants did the exercise. We want to quantify how well they perform a particular activity rather than how much. The training dataset contains 19622 rows and 160 columns, while the test set contains 20 rows, 160 columns. 
+
+[Weight Lifting Dataset Reference](http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har)
+
+## Data Processing
+```{r}
+# Training dataset
+if(!file.exists('./pml_training')){
+      dir.create('./pml_training')}
+
+training_file <- 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv'
+download.file(training_file, destfile = './pml_training.csv')
+pml_training <- read.csv('./pml_training.csv', 
+                         na.strings = c('NA', '#DIV/0!', ''))
+
+# Testing dataset
+if(!file.exists('./pml_testing')){
+      dir.create('./pml_testing')}
+
+testing_file <- 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv'
+download.file(testing_file, destfile = './pml_testing.csv')
+pml_testing <- read.csv('./pml_testing.csv', 
+                         na.strings = c('NA', '#DIV/0!', ''))
+```
+
+## Cleaning the datasets
+Here, we want to remove near-zero variable predictors since these are non-informative. 
+```{r}
+library(caret)
+
+# Note, the function nearZeroVar returns the position of the problematic variables. Thus, we can subset our dataset using this function by removing the near-zero and zero variable predictors.
+
+removeNZV_train <- nearZeroVar(pml_training)
+n_training <- pml_training[, -removeNZV_train]
+```
+Now, we want to remove variables with 60% missing value since these are non-informative as well. 
+```{r}
+removeNA_train <- sapply(colnames(n_training), function(x) 
+      if(sum(is.na(n_training[, x])) > 0.60*nrow(n_training))
+            {return(T)} else{return(F)})
+
+n_training <- n_training[, !removeNA_train]
+```
+Finally, remove unncessary variables, i.e. variables that are not needed to create our prediction model (ID, timestamps, etc.)
+```{r}
+n_training <- n_training[, -(1:6)]
+```
+
+## Data Slicing
+n_training will be split into two datasets: 70% training, 30% testing. 
+```{r}
+inTrain <- createDataPartition(y = n_training$classe, p = 0.7, 
+                               list = F)
+training <- n_training[inTrain, ]
+testing <- n_training[-inTrain, ]
+```
+
+## Prediction Models
+### Classification Tree
+```{r}
+library(rpart)
+
+# For reproducibility, we set the seed. 
+set.seed(83348)
+
+modFitTree <- train(classe ~., data = n_training, method = 'rpart')
+predTree <- predict(modFitTree, newdata = testing)
+confusionMatrix(predTree, testing$classe)
+```
+
+### Random Forest
+the randomForest function performed more efficiently than doing train() with method = 'rf', which is why randomForest was used in this case. 
+```{r}
+library(randomForest)
+modFitRf <- randomForest(classe ~., data = n_training)
+predRf <- predict(modFitRf, newdata = testing)
+confusionMatrix(predRf, testing$classe)
+```
+
+## Conclusion and Errors
+The accuracy of the classification tree method is about 50%, which is not good enough to be used on our test set. Thus, we tried using random forest to see if can obtain better results. Here, random forest gave us a better prediction, i.e. 99% accuracy. Thus, this model will be used for final predictions. For our expected out of sample error, we can estimate it using our in sample error obtained from cross-validation. 
+
+## Prediction on Test Set
+```{r}
+finalPred <- predict(modFitRf, pml_testing, type = 'class')
+print(finalPred)
+```
